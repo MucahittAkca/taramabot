@@ -1,0 +1,4 @@
+.env
+radar.db
+out/
+state.json
