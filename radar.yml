@@ -1,0 +1,55 @@
+name: radar
+
+on:
+  schedule:
+    # 30 dk'da bir (dakika 7 ve 37: saat başındaki yoğunluktan kaçınmak için). Saatte bir için: "7 * * * *"
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+    inputs:
+      init:
+        description: "İlk kurulum: mevcut haberleri görüldü say, mesaj atma"
+        type: boolean
+        default: false
+
+concurrency:
+  group: radar
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Görülen haberlerin listesi (state.json) çalıştırmalar arasında cache'te tutulur
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: radar-state-${{ github.run_id }}
+          restore-keys: radar-state-
+
+      - name: Scan and notify
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          USE_REDDIT: "0"
+        run: python notify.py ${{ inputs.init && '--init' || '' }}
+
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state.json
+          key: radar-state-${{ github.run_id }}
