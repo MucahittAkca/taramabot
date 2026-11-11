@@ -110,12 +110,13 @@ def format_message(c: radar.Cluster) -> str:
 
 
 # ---------------------------------------------------------------- Telegram
-def send(token: str, chat_id: str, text: str) -> None:
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    body = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+API = "https://api.telegram.org/bot{}/{}"
+
+
+def tg(token: str, method: str, body: dict):
     r = None
     for _ in range(2):
-        r = httpx.post(url, json=body, timeout=30)
+        r = httpx.post(API.format(token, method), json=body, timeout=30)
         if r.status_code == 429:
             try:
                 wait = int(r.json().get("parameters", {}).get("retry_after", 5))
@@ -124,8 +125,34 @@ def send(token: str, chat_id: str, text: str) -> None:
             time.sleep(wait + 1)
             continue
         break
+    return r
+
+
+def send(token: str, chat_id: str, text: str, silent: bool = False) -> int | None:
+    """silent=True: mesaj gelir ama telefon bildirimi/ses çıkarmaz."""
+    r = tg(token, "sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                                  "disable_notification": silent})
     if r is None or r.status_code != 200:
         raise RuntimeError(f"Telegram {getattr(r, 'status_code', '?')}: {getattr(r, 'text', '')[:200]}")
+    try:
+        return r.json()["result"]["message_id"]
+    except Exception:
+        return None
+
+
+def heartbeat(token, chat_id, st: dict, text: str, dry: bool = False) -> None:
+    """Bildirimsiz durum mesajı ("bot çalışıyor"). Önceki durum mesajını siler, sohbet dolmasın.
+    Silinmesin istersen KEEP_HEARTBEATS=1."""
+    if dry:
+        print("[sessiz] " + text)
+        return
+    if st.get("hb") and os.environ.get("KEEP_HEARTBEATS") != "1":
+        try:
+            tg(token, "deleteMessage", {"chat_id": chat_id, "message_id": st["hb"]})
+        except Exception:
+            pass
+    st["hb"] = send(token, chat_id, text, silent=True)
+    save_state(st)
 
 
 # ---------------------------------------------------------------- ana akış
@@ -144,9 +171,19 @@ def main() -> int:
         sys.exit("TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID gerekli.")
 
     st = load_state()
+    now_tr = datetime.now(TR)
+    stamp = now_tr.strftime("%H:%M")
+
+    if not args.init and QUIET_START <= now_tr.hour < QUIET_END and not (args.force or args.dry_run):
+        print(f"Sessiz saat (TR {stamp}). Haber gönderimi yok.")
+        heartbeat(token, chat, st, f"🌙 Sessiz saat · {stamp}")
+        return 0
+
     items = radar.collect(WINDOW_HOURS)
     if not items:
         print("Hiç haber alınamadı (kaynaklar erişilemiyor olabilir).")
+        if not args.init:
+            heartbeat(token, chat, st, f"⚠️ Kaynaklardan haber alınamadı · {stamp}", dry=args.dry_run)
         return 0
     ranked = radar.rank(items)
 
@@ -157,16 +194,17 @@ def main() -> int:
         print(f"Başlangıç: {len(ranked)} haber 'görüldü' olarak işaretlendi.")
         return 0
 
-    hour = datetime.now(TR).hour
-    if QUIET_START <= hour < QUIET_END and not (args.force or args.dry_run):
-        print(f"Sessiz saat (TR {hour}:xx). Gönderim yok.")
-        return 0
-
     fresh = pick(ranked, st)
     batch = fresh[:MAX_PER_RUN]
     print(f"{len(ranked)} küme, {len(fresh)} gönderilecek, bu turda {len(batch)}.")
 
-    for c in batch:
+    if not batch:  # yeni haber yok: sessiz durum mesajı
+        heartbeat(token, chat, st, f"📭 Yeni haber yok · {stamp} · {len(ranked)} haber tarandı", dry=args.dry_run)
+        if not args.dry_run:
+            save_state(st)
+        return 0
+
+    for c in batch:  # haber var: bildirimli mesaj
         text = format_message(c)
         if args.dry_run:
             print("-" * 40 + "\n" + text)
