@@ -1,9 +1,6 @@
 name: radar
 
 on:
-  schedule:
-    # 30 dk'da bir (dakika 7 ve 37: saat başındaki yoğunluktan kaçınmak için). Saatte bir için: "7 * * * *"
-    - cron: "7,37 * * * *"
   workflow_dispatch:
     inputs:
       init:
