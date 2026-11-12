@@ -45,7 +45,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           USE_REDDIT: "0"
-          DRAFT_BUTTON: "0"   # Cloudflare Worker kurulunca "1" yap ("Taslak yaz" butonu)
+          DRAFT_BUTTON: "1"   # Cloudflare Worker kurulunca "1" yap ("Taslak yaz" butonu)
           # İsteğe bağlı ayarlar (varsayılanlar notify.py başında): MIN_SCORE, MAX_PER_RUN, QUIET_END, DIGEST_HOUR, FAIL_LIMIT...
         run: python notify.py ${{ inputs.init && '--init' || '' }}
 
