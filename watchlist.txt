@@ -1,0 +1,163 @@
+# SetRaporu takip listesi. Başlıkta geçerse eşiğe bakmadan bildirim gelir.
+# Her satıra bir kelime/isim. # ile başlayan satırlar yorumdur. Büyük/küçük harf fark etmez.
+
+# --- Yönetmenler ---
+nolan
+villeneuve
+scorsese
+spielberg
+tarantino
+fincher
+cameron
+james gunn
+zack snyder
+guillermo del toro
+wes anderson
+bong joon-ho
+park chan-wook
+aronofsky
+greta gerwig
+jordan peele
+ridley scott
+kubrick
+coppola
+rian johnson
+edgar wright
+taika waititi
+denis villeneuve
+russo brothers
+sam raimi
+ryan coogler
+nuri bilge ceylan
+fatih akin
+
+# --- Oyuncular ---
+tom cruise
+leonardo dicaprio
+margot robbie
+zendaya
+timothée chalamet
+timothee chalamet
+robert downey
+christian bale
+cillian murphy
+florence pugh
+pedro pascal
+ryan gosling
+emma stone
+keanu reeves
+brad pitt
+scarlett johansson
+tom holland
+henry cavill
+jenna ortega
+anya taylor-joy
+austin butler
+dwayne johnson
+tom hardy
+adam driver
+sydney sweeney
+kıvanç tatlıtuğ
+haluk bilginer
+serenay sarıkaya
+
+# --- Franchise ve evrenler ---
+marvel
+mcu
+avengers
+x-men
+spider-man
+dc studios
+superman
+batman
+joker
+star wars
+lucasfilm
+harry potter
+lord of the rings
+dune
+avatar
+game of thrones
+house of the dragon
+stranger things
+squid game
+breaking bad
+the last of us
+fast & furious
+fast and furious
+mission: impossible
+james bond
+john wick
+jurassic
+godzilla
+transformers
+toy story
+frozen
+shrek
+the matrix
+terminator
+indiana jones
+planet of the apes
+mandalorian
+the boys
+
+# --- Stüdyo ve platformlar ---
+netflix
+hbo
+disney+
+apple tv
+prime video
+amazon mgm
+hulu
+paramount
+warner bros
+universal pictures
+sony pictures
+lionsgate
+a24
+neon
+pixar
+disney
+skydance
+legendary pictures
+blumhouse
+studio ghibli
+toho
+gkids
+mubi
+tabii
+blutv
+exxen
+
+# --- Ödül ve festivaller ---
+oscar
+academy award
+golden globe
+emmy
+bafta
+cannes
+venice
+sundance
+berlinale
+tiff
+toronto film festival
+altın portakal
+sinema yazarları
+
+# --- Gişe ve sektör gelişmeleri ---
+highest-grossing
+record-breaking
+biggest opening
+flop
+box office bomb
+cancelled
+canceled
+
+# --- Türkiye ---
+turkish
+türk
+turkey
+istanbul
+yeşilçam
+yerli dizi
+yerli film

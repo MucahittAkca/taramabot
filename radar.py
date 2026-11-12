@@ -74,6 +74,9 @@ STOP = set("the a an of in on to for and with is are as at by from this that its
            "debuted release released official trailer streaming".split())
 
 
+FAILED: set[str] = set()  # son taramada alınamayan kaynaklar (notify.py sağlık kontrolü kullanır)
+
+
 @dataclass
 class Item:
     title: str
@@ -146,9 +149,14 @@ def fetch_rss(client: httpx.Client, name: str, url: str, weight: float, since: d
         r.raise_for_status()
     except Exception as e:
         warn(f"{name}: alınamadı ({e.__class__.__name__})")
+        FAILED.add(name)
         return []
     out = []
-    for e in feedparser.parse(r.content).entries:
+    entries = feedparser.parse(r.content).entries
+    if not entries:  # 200 döndü ama feed değil (engel sayfası vb.)
+        warn(f"{name}: feed boş geldi")
+        FAILED.add(name)
+    for e in entries:
         ts = e.get("published_parsed") or e.get("updated_parsed")
         pub = datetime.fromtimestamp(calendar.timegm(ts), timezone.utc) if ts else datetime.now(timezone.utc)
         if pub < since or not e.get("title") or not e.get("link"):
@@ -212,11 +220,13 @@ def fetch_reddit(client: httpx.Client, sub: str, weight: float, since: datetime)
         except Exception as e:
             errors.append(f"{kind} {e.__class__.__name__}")
     warn(f"r/{sub}: alınamadı ({', '.join(errors)})")
+    FAILED.add(f"r/{sub}")
     return []
 
 
 def collect(hours: int) -> list[Item]:
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    FAILED.clear()
     items: list[Item] = []
     with httpx.Client(headers={"User-Agent": UA}, timeout=20, follow_redirects=True) as client:
         for name, (url, w) in FEEDS.items():
