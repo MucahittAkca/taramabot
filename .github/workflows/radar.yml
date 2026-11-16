@@ -1,9 +1,6 @@
 name: radar
 
 on:
-  schedule:
-    # Saat başı tarama, her saatin 35. dakikasında (12:35 ve 17:35 çalışmaları 12:30 / 17:30 taslaklarını tetikler)
-    - cron: "35 * * * *"
   workflow_dispatch:
     inputs:
       init:
