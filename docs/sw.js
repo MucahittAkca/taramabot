@@ -1,6 +1,6 @@
 // Önbellek: uygulama dosyaları ağ öncelikli (güncellemeler hemen gelir, çevrimdışıysa önbellekten açılır),
 // fontlar önbellek öncelikli (çevrimdışı da doğru font çizilir).
-const CACHE = "sr-v1";
+const CACHE = "sr-v2";
 const SHELL = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {

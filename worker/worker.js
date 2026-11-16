@@ -1,18 +1,22 @@
-// SetRaporu: Telegram "Taslak yaz" butonu (Cloudflare Worker)
-// Butona basılınca: mesajdaki habere ait makaleyi (varsa) çeker, Wiro LLM ile Türkçe post taslağı yazar,
-// taslağı aynı sohbete haberin altına yanıt olarak gönderir.
+// SetRaporu: Telegram botu için Cloudflare Worker
+//  1) ÖZEL TASLAK: bota bir haber linki (ya da haber metni) yaz -> Türkçe taslak yanıt gelir.
+//     Linkin yanına not da yazabilirsin: "https://... bütçe çelişkisini vurgula"
+//  2) "Taslak yaz" butonu (eski mesajlarda kalan butonlar için)
 //
 // Gerekli ayarlar (Workers > Settings > Variables and Secrets):
 //   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, WEBHOOK_SECRET, WIRO_API_KEY
 //   isteğe bağlı: WIRO_API_SECRET (signature projeyse), WIRO_MODEL (varsayılan openai/gpt-6-1-terra)
+// Webhook: allowed_updates içinde "message" ve "callback_query" olmalı.
+// Not: aşağıdaki SYSTEM, ai.py içindeki DRAFT_SYSTEM ile aynı kuralları taşır; birini değiştirirsen ötekini de değiştir.
 
 const SYSTEM = `Sen SetRaporu adlı Türkçe film/dizi Instagram sayfasının editörüsün.
 Sayfa hikaye anlatımı formatında, TEK görsel + detaylı caption paylaşıyor.
-Sana tek bir haber veriliyor: başlık, kısa özet ve (varsa) haber sitesinden alınmış makale metni.
+Sana tek bir haber veriliyor: başlık, kısa özet, haber sitesinden alınmış makale metni (article_text) ve varsa editörün özel isteği (editor_note).
 
 Kurallar:
-- Sadece verilen bilgileri kullan. Rakam, tarih, isim UYDURMA.
+- Sadece verilen bilgileri kullan. Rakam, tarih, isim UYDURMA. Metin yetersizse kısa tut, eksikleri DOĞRULA'ya yaz.
 - Haberi çevirme, kendi cümlelerinle yeniden anlat. Kaynaktan cümle kopyalama.
+- editor_note varsa (açı, vurgu, ton isteği) ona uy, ama kaynakta olmayan bilgi ekleme.
 - Caption OKUYUCUYA yazılır. Caption içinde "başlık", "özet", "makale", "kaynakta yer almıyor" gibi kaynağa ya da senin işine gönderme YAPMA. Bilmediğin ya da belirsiz konuyu caption'da hiç açma; sadece DOĞRULA bölümüne yaz. Caption içinde [DOĞRULA] yazma.
 - Hitap samimi ve tekil olsun ("sen", "sence"). Resmi "siz" kullanma.
 - Kaynaklar ya da metin farklı rakam veriyorsa birini kesin gibi yazma: "yaklaşık" de, farkı DOĞRULA'ya yaz.
@@ -29,6 +33,11 @@ CAPTION:
 DOĞRULA:
 (doğrulanması gereken noktalar, her biri ayrı satırda; rakam/sıralama/tarih varsa boş bırakma)`;
 
+const HELP =
+  "Bir haber linki gönder, taslağını yazayım.\n" +
+  "Linkin yanına not da ekleyebilirsin, örn: https://... bütçe çelişkisini vurgula\n" +
+  "Sayfa açılmazsa haberin metnini yapıştır (link olmadan da olur).";
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== "POST") return new Response("SetRaporu worker ok");
@@ -38,45 +47,81 @@ export default {
     let update;
     try { update = await request.json(); } catch { return new Response("bad request", { status: 400 }); }
 
-    const cb = update.callback_query;
-    if (!cb || cb.data !== "draft") return new Response("ok");
-    const msg = cb.message;
-    // yalnızca senin sohbetin
-    if (!msg || String(msg.chat.id) !== String(env.TELEGRAM_CHAT_ID)) return new Response("ok");
-
-    ctx.waitUntil(handle(env, cb, msg)); // uzun işi arka planda yap, Telegram'a hemen "ok" dön
+    const own = (chat) => chat && String(chat.id) === String(env.TELEGRAM_CHAT_ID); // yalnızca senin sohbetin
+    if (update.callback_query) {
+      const cb = update.callback_query;
+      if (cb.data === "draft" && cb.message && own(cb.message.chat)) ctx.waitUntil(handleButton(env, cb, cb.message));
+    } else if (update.message && own(update.message.chat)) {
+      ctx.waitUntil(handleMessage(env, update.message)); // uzun işi arka planda yap, Telegram'a hemen "ok" dön
+    }
     return new Response("ok");
   },
 };
 
-async function handle(env, cb, msg) {
+// ---------------------------------------------------------------- özel taslak (link / metin)
+async function handleMessage(env, m) {
   try {
-    await tg(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "Taslak hazırlanıyor, ~20 sn…" });
+    const text = (m.text || "").trim();
+    if (!text) return;
+    if (text.startsWith("/")) { await reply(env, m, HELP); return; }
 
-    const lines = (msg.text || "").split("\n");
-    const title = (lines[0] || "").replace(/^\S+\s+/, ""); // baştaki emojiyi at
-    const summary = lines
-      .slice(1)
-      .filter((l) => !l.startsWith("Puan") && !l.startsWith("🔖"))
-      .join(" ")
-      .trim();
-    const links = (msg.entities || []).filter((e) => e.type === "text_link").map((e) => e.url);
-    const articleUrl = links.find((u) => !/reddit\.com/.test(u));
-    const article = articleUrl ? await fetchArticle(articleUrl) : "";
+    const urls = extractUrls(m);
+    const rest = text.replace(/https?:\/\/\S+/g, "").trim();
+    let page = { title: "", text: "" }, note = "";
 
-    const user = JSON.stringify({ title, summary, source_links: links, article_text: article });
-    const draft = await callLLM(env, user);
-    await sendLong(env, msg.chat.id, draft, msg.message_id);
+    if (urls.length) {
+      await tg(env, "sendChatAction", { chat_id: m.chat.id, action: "typing" });
+      page = await fetchPage(urls[0]);
+      if (page.text.length >= 300) note = rest;                        // sayfa okundu: kalan yazı editör notu
+      else if (rest.length >= 150) page.text = rest;                  // sayfa okunamadı ama metni sen yapıştırdın
+      else {
+        await reply(env, m, "Sayfayı okuyamadım (site botları engelliyor olabilir). Haberin metnini linkle birlikte yapıştırır mısın? Ona göre yazarım.");
+        return;
+      }
+    } else if (rest.length >= 150) {
+      page.text = rest;                                               // yapıştırılmış haber metni
+    } else {
+      await reply(env, m, HELP);
+      return;
+    }
+
+    await tg(env, "sendChatAction", { chat_id: m.chat.id, action: "typing" });
+    const user = JSON.stringify({ title: page.title, source_links: urls, editor_note: note, article_text: page.text });
+    await sendLong(env, m.chat.id, await callLLM(env, user), m.message_id);
   } catch (e) {
-    await tg(env, "sendMessage", {
-      chat_id: msg.chat.id,
-      reply_to_message_id: msg.message_id,
-      text: "❌ Taslak üretilemedi: " + String((e && e.message) || e).slice(0, 300),
-    });
+    await reply(env, m, "❌ Taslak üretilemedi: " + String((e && e.message) || e).slice(0, 300));
   }
 }
 
-async function fetchArticle(url) {
+function extractUrls(m) {
+  const out = [], text = m.text || "";
+  for (const e of m.entities || []) {
+    if (e.type === "url") out.push(text.slice(e.offset, e.offset + e.length));
+    else if (e.type === "text_link" && e.url) out.push(e.url);
+  }
+  if (!out.length) out.push(...(text.match(/https?:\/\/\S+/g) || []));
+  return [...new Set(out)];
+}
+
+// ---------------------------------------------------------------- eski "Taslak yaz" butonu
+async function handleButton(env, cb, msg) {
+  try {
+    await tg(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "Taslak hazırlanıyor, ~20 sn…" });
+    const lines = (msg.text || "").split("\n");
+    const title = (lines[0] || "").replace(/^\S+\s+/, ""); // baştaki emojiyi at
+    const summary = lines.slice(1).filter((l) => !l.startsWith("Puan") && !l.startsWith("🔖")).join(" ").trim();
+    const links = (msg.entities || []).filter((e) => e.type === "text_link").map((e) => e.url);
+    const articleUrl = links.find((u) => !/reddit\.com/.test(u));
+    const page = articleUrl ? await fetchPage(articleUrl) : { title: "", text: "" };
+    const user = JSON.stringify({ title, summary, source_links: links, article_text: page.text });
+    await sendLong(env, msg.chat.id, await callLLM(env, user), msg.message_id);
+  } catch (e) {
+    await reply(env, msg, "❌ Taslak üretilemedi: " + String((e && e.message) || e).slice(0, 300));
+  }
+}
+
+// ---------------------------------------------------------------- yardımcılar
+async function fetchPage(url) {
   try {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 8000);
@@ -86,14 +131,16 @@ async function fetchArticle(url) {
       redirect: "follow",
     });
     clearTimeout(timer);
-    if (!r.ok) return "";
+    if (!r.ok) return { title: "", text: "" };
     const page = (await r.text()).slice(0, 600000);
-    const paras = [...page.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
-      .map((m) => clean(m[1]))
-      .filter((p) => p.length > 60);
-    return paras.join("\n").slice(0, 3500);
+    const paras = [...page.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)].map((m) => clean(m[1])).filter((p) => p.length > 60);
+    const og =
+      page.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
+      page.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i) ||
+      page.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    return { title: og ? clean(og[1]) : "", text: paras.join("\n").slice(0, 3500) };
   } catch {
-    return ""; // makale çekilemezse mesajdaki özetle devam
+    return { title: "", text: "" };
   }
 }
 
@@ -126,14 +173,14 @@ async function callLLM(env, userContent) {
   return data.choices[0].message.content;
 }
 
+async function reply(env, m, text) {
+  await tg(env, "sendMessage", { chat_id: m.chat.id, reply_to_message_id: m.message_id, text });
+}
+
 async function sendLong(env, chatId, text, replyTo) {
   const parts = text.match(/[\s\S]{1,3900}/g) || [text];
   for (let i = 0; i < parts.length; i++) {
-    await tg(env, "sendMessage", {
-      chat_id: chatId,
-      text: parts[i],
-      ...(i === 0 ? { reply_to_message_id: replyTo } : {}),
-    });
+    await tg(env, "sendMessage", { chat_id: chatId, text: parts[i], ...(i === 0 ? { reply_to_message_id: replyTo } : {}) });
   }
 }
 

@@ -2,12 +2,16 @@ name: radar
 
 on:
   schedule:
-    # 30 dk'da bir (dakika 7 ve 37: saat başındaki yoğunluktan kaçınmak için). Saatte bir için: "7 * * * *"
-    - cron: "7,37 * * * *"
+    # Saat başı tarama, her saatin 35. dakikasında (12:35 ve 17:35 çalışmaları 12:30 / 17:30 taslaklarını tetikler)
+    - cron: "35 * * * *"
   workflow_dispatch:
     inputs:
       init:
-        description: "İlk kurulum: mevcut haberleri görüldü say, mesaj atma"
+        description: "İlk kurulum: mevcut haberleri görüldü say, havuzu boşalt, mesaj atma"
+        type: boolean
+        default: false
+      now:
+        description: "Taslak adımını saatini beklemeden hemen çalıştır (test)"
         type: boolean
         default: false
 
@@ -21,7 +25,7 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
 
@@ -32,7 +36,7 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # Görülen haberlerin listesi (state.json) çalıştırmalar arasında cache'te tutulur
+      # Havuz ve görülen haberler (state.json) çalıştırmalar arasında cache'te tutulur
       - name: Restore state
         uses: actions/cache/restore@v4
         with:
@@ -40,14 +44,16 @@ jobs:
           key: radar-state-${{ github.run_id }}
           restore-keys: radar-state-
 
-      - name: Scan and notify
+      - name: Scan, and draft when it is time
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WIRO_API_KEY: ${{ secrets.WIRO_API_KEY }}
+          WIRO_API_SECRET: ${{ secrets.WIRO_API_SECRET }}   # signature projeyse; yoksa boş kalsın
+          WIRO_MODEL: "openai/gpt-6-1-terra"
           USE_REDDIT: "0"
-          DRAFT_BUTTON: "1"   # Cloudflare Worker kurulunca "1" yap ("Taslak yaz" butonu)
-          # İsteğe bağlı ayarlar (varsayılanlar notify.py başında): MIN_SCORE, MAX_PER_RUN, QUIET_END, DIGEST_HOUR, FAIL_LIMIT...
-        run: python notify.py ${{ inputs.init && '--init' || '' }}
+          # İsteğe bağlı ayarlar (varsayılanlar notify.py başında): SLOTS, MIN_SCORE, POOL_MAX, FAIL_LIMIT...
+        run: python notify.py ${{ inputs.init && '--init' || '' }} ${{ inputs.now && '--now' || '' }}
 
       - name: Save state
         if: always()

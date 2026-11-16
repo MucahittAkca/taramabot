@@ -53,9 +53,9 @@ h1{font-size:17px;margin:0}
   canvas{max-height:38vh}
   #tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
   #tabs button{flex:0 0 auto}
-  .actions{position:sticky;bottom:0;z-index:5;display:grid;grid-template-columns:repeat(3,1fr);padding:8px}
-  .actions #note{grid-column:1/-1;font-size:11px}
-  .actions button{padding:10px 6px;font-size:13px}
+  .actions{position:sticky;bottom:0;z-index:5;display:flex;flex-wrap:wrap;padding:8px}
+  .actions #note{flex:1 0 100%;font-size:11px}
+  .actions button{flex:1 1 0;padding:10px 6px;font-size:14px}
   input[type=text],textarea,select{font-size:16px;padding:11px 10px}
   button{min-height:44px}
   input[type=range]{height:34px}
@@ -77,6 +77,8 @@ h1{font-size:17px;margin:0}
 <button class="alt" id="rmimg" type="button">Görseli kaldır</button>
 <label>Kanca metin <span class="hint">*renk1* · _renk2_ · #kutu# · ^altı çizgili^ · Enter satır atlar</span>
 <textarea id="hook"></textarea></label>
+<label>Açıklama metni <span class="hint">Başlığın altında küçük yazı. Boş bırakırsan görünmez · *renk1* · _renk2_ · Enter satır atlar</span>
+<textarea id="desc" placeholder="İsteğe bağlı"></textarea></label>
 <label>Haber rozeti
 <select id="badge"><option value="none">Yok</option><option>SON DAKİKA</option><option>FRAGMAN</option><option>YENİLENDİ</option><option>ÖZEL</option></select></label>
 <div class="row">
@@ -109,6 +111,7 @@ h1{font-size:17px;margin:0}
 <label>Alt yazı (kaynak) <input type="text" id="src" value="Kaynak: Deadline"></label>
 </div>
 <label>Yazı boyutu <input type="range" id="fs" min="60" max="170" value="120"></label>
+<label>Açıklama boyutu <input type="range" id="ds" min="28" max="80" value="44"></label>
 <label>Karartma <input type="range" id="dark" min="0" max="90" value="35"></label>
 </div></details>
 
@@ -128,13 +131,18 @@ h1{font-size:17px;margin:0}
 </div>
 <button class="alt" id="tsave" type="button">Şablonu kaydet</button>
 </div></details>
+
+<details class="grp"><summary>Tüm slaytlar ve video</summary><div class="inner">
+<button class="alt" id="zip" type="button">Hepsini paylaş</button>
+<button class="alt" id="dlzip" type="button">Hepsini indir (zip)</button>
+<button class="alt" id="reel" type="button">Reels videosu (8 sn)</button>
+</div></details>
 </section>
 
 <section class="actions" aria-label="Çıktı">
 <div class="hint" id="note"></div>
-<button id="save" type="button">Bu slaytı PNG kaydet</button>
-<button id="zip" type="button">Hepsini indir (zip)</button>
-<button id="reel" type="button">Reels (8 sn)</button>
+<button id="save" type="button">Paylaş</button>
+<button id="dl" type="button">PNG indir</button>
 </section>
 </main>
 <script>
@@ -143,16 +151,16 @@ const cv=$('cv'),ctx=cv.getContext('2d');
 const FMT={45:[1080,1350],916:[1080,1920],11:[1080,1080]};
 const FONTS={anton:'400 {s}px Anton, Impact, sans-serif',bebas:'400 {s}px "Bebas Neue", Impact, sans-serif',archivo:'400 {s}px "Archivo Black", Impact, sans-serif',playfair:'900 {s}px "Playfair Display", Georgia, serif'};
 const PRESETS={haber:{c1:'#3ddc84',c2:'#ffd60a',pos:'bottom',dark:35},alarm:{c1:'#ff3b30',c2:'#ffffff',pos:'bottom',dark:50},fragman:{c1:'#ffd60a',c2:'#3ddc84',pos:'mid',dark:40}};
-const G=['c1','c2','pos','style','font','fmt','fs','dark','src','handle','preset','lsize','showh'];
+const G=['c1','c2','pos','style','font','fmt','fs','ds','dark','src','handle','preset','lsize','showh'];
 const ls={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
-const mk=()=>({img:null,hook:'Beklenen dönüş *resmen onaylandı*',zoom:100,ox:0,oy:0,badge:'none',tx:0,ty:0,bx:0,by:0});
+const mk=()=>({img:null,desc:'',hook:'Beklenen dönüş *resmen onaylandı*',zoom:100,ox:0,oy:0,badge:'none',tx:0,ty:0,bx:0,by:0});
 const slides=[mk()];let cur=0,logoImg=null,busy=false;
 const hit={},off={b:[0,0],s:[0,0]};
 const note=t=>{$('note').textContent=t};
 
-function tokens(t){
+function tokens(t,up=true){
   const out=[];
-  t.toLocaleUpperCase('tr').split('\n').forEach((line,li)=>{
+  (up?t.toLocaleUpperCase('tr'):t).split('\n').forEach((line,li)=>{
     if(li)out.push({br:1});
     line.split(/(\*[^*]+\*|_[^_]+_|#[^#]+#|\^[^^]+\^)/).forEach(seg=>{
       if(!seg)return;
@@ -196,10 +204,23 @@ function draw(p,idx=cur){
     if(cw+(L.length?sp:0)+w>maxW&&L.length){lines.push([]);cw=0}
     const L2=lines[lines.length-1];cw+=(L2.length?sp:0)+w;L2.push({...t,width:w});total++;
   });
+  const ds=+$('ds').value,dlh=ds*1.3,dlines=[[]],hasD=!!(S.desc&&S.desc.trim());let dcw=0,dsp=0;
+  if(hasD){
+    ctx.font='600 '+ds+'px Inter, system-ui, sans-serif';dsp=ctx.measureText(' ').width;
+    tokens(S.desc,false).forEach(t=>{
+      if(t.br){dlines.push([]);dcw=0;return}
+      const w=ctx.measureText(t.w).width,L=dlines[dlines.length-1];
+      if(dcw+(L.length?dsp:0)+w>maxW&&L.length){dlines.push([]);dcw=0}
+      const L2=dlines[dlines.length-1];dcw+=(L2.length?dsp:0)+w;L2.push({...t,width:w});
+    });
+    ctx.font=fontStr(fs);
+  }
+  const descH=hasD?dlines.length*dlh:0,gap=hasD?fs*.22:0;
+  const dmw=hasD?Math.max(10,...dlines.map(l=>l.reduce((a,t,k)=>a+t.width+(k?dsp:0),0))):0;
   const lh=fs*1.08,bh=lines.length*lh,footY=H-(tall?260:80);
   const hasB=S.badge!=='none';
-  const y0=pos==='top'?(tall?300:130)+(hasB?110:0):pos==='mid'?(H-bh)/2:footY-110-bh;
-  const mw=Math.max(10,...lines.map(l=>l.reduce((a,t,k)=>a+t.width+(k?sp:0),0)));hit.text={x:90+S.tx,y:y0+S.ty,w:mw,h:bh};
+  const y0=pos==='top'?(tall?300:130)+(hasB?110:0):pos==='mid'?(H-bh-gap-descH)/2:footY-110-bh-gap-descH;
+  const mw=Math.max(10,...lines.map(l=>l.reduce((a,t,k)=>a+t.width+(k?sp:0),0)));hit.text={x:90+S.tx,y:y0+S.ty,w:Math.max(mw,dmw),h:bh+gap+descH};
   const shown=anim?Math.ceil(total*Math.min(1,p/.55)):total;
   let n=0;
   lines.forEach((ln,i)=>{
@@ -219,6 +240,22 @@ function draw(p,idx=cur){
     });
   });
   ctx.shadowBlur=0;
+  if(hasD){
+    ctx.globalAlpha=anim?Math.max(0,Math.min(1,(p-.55)/.15)):1;
+    ctx.font='600 '+ds+'px Inter, system-ui, sans-serif';ctx.textBaseline='top';
+    const dy0=y0+S.ty+bh+gap;
+    dlines.forEach((ln,i)=>{
+      const y=dy0+i*dlh,lw=ln.reduce((a,t,k)=>a+t.width+(k?dsp:0),0);
+      if(style==='band'&&ln.length){ctx.fillStyle='rgba(0,0,0,.78)';ctx.fillRect(70+S.tx,y,lw+40,dlh)}
+      let x=90+S.tx;
+      ln.forEach(t=>{
+        ctx.shadowColor='rgba(0,0,0,.6)';ctx.shadowBlur=style==='shadow'?14:0;
+        if(style==='outline'){ctx.lineJoin='round';ctx.lineWidth=ds*.12;ctx.strokeStyle='#000';ctx.strokeText(t.w,x,y)}
+        ctx.fillStyle=cols[t.c===3||t.c===4?0:t.c];ctx.fillText(t.w,x,y);ctx.shadowBlur=0;x+=t.width+dsp;
+      });
+    });
+    ctx.globalAlpha=1;
+  }
   if(hasB){
     ctx.font='600 34px Inter, system-ui, sans-serif';ctx.textBaseline='middle';
     const bw=ctx.measureText(S.badge).width+44,by=(tall?250:100)+S.by,bx=90+S.bx;hit.badge={x:bx,y:by,w:bw,h:60};
@@ -249,8 +286,8 @@ function tabs(){
   const a=document.createElement('button');a.type='button';a.className='alt';a.textContent='+ Slayt ekle';a.onclick=()=>{slides.push(mk());slides[slides.length-1].hook='';cur=slides.length-1;toUI();tabs();draw()};t.appendChild(a);
   if(slides.length>1){const d=document.createElement('button');d.type='button';d.className='alt';d.textContent='Bu slaytı sil';d.onclick=()=>{slides.splice(cur,1);cur=Math.min(cur,slides.length-1);toUI();tabs();draw()};t.appendChild(d)}
 }
-const toUI=()=>{const S=slides[cur];['hook','zoom','ox','oy','badge'].forEach(k=>$(k).value=S[k])};
-['hook','zoom','ox','oy','badge'].forEach(k=>$(k).addEventListener('input',()=>{const v=$(k).value;slides[cur][k]=['zoom','ox','oy'].includes(k)?+v:v;draw()}));
+const toUI=()=>{const S=slides[cur];['hook','desc','zoom','ox','oy','badge'].forEach(k=>$(k).value=S[k])};
+['hook','desc','zoom','ox','oy','badge'].forEach(k=>$(k).addEventListener('input',()=>{const v=$(k).value;slides[cur][k]=['zoom','ox','oy'].includes(k)?+v:v;draw()}));
 $('file').addEventListener('change',e=>{
   const f=e.target.files[0];if(!f)return;
   const im=new Image();im.onload=()=>{slides[cur].img=im;draw()};im.src=URL.createObjectURL(f);
@@ -276,9 +313,9 @@ $('tlist').onchange=e=>{const T=tplList();const n=e.target.value;if(T[n]){setG(T
 const MIME={png:'image/png',zip:'application/zip',mp4:'video/mp4',webm:'video/webm'};
 const TOUCH=matchMedia('(pointer:coarse)').matches;
 const canShareFiles=files=>{try{return !!(navigator.canShare&&navigator.canShare({files}))}catch(e){return false}};
-async function saveFile(name,data){
+async function saveFile(name,data,force){
   const type=MIME[name.split('.').pop()]||'application/octet-stream';
-  if(TOUCH){
+  if(TOUCH&&!force){
     const file=new File([data],name,{type});
     if(canShareFiles([file])){
       try{await navigator.share({files:[file]});return note('Paylaşım menüsü açıldı: “Görüntüyü kaydet” ya da Instagram’ı seç.')}
@@ -290,6 +327,7 @@ async function saveFile(name,data){
 }
 const png=()=>new Promise(r=>cv.toBlob(r,'image/png')).then(b=>b.arrayBuffer()).then(a=>new Uint8Array(a));
 $('save').onclick=async()=>{draw();await saveFile('setraporu-slayt-'+(cur+1)+'.png',await png())};
+$('dl').onclick=async()=>{draw();await saveFile('setraporu-slayt-'+(cur+1)+'.png',await png(),true)};
 
 const T32=(()=>{const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
 const crc=d=>{let c=-1;for(let i=0;i<d.length;i++)c=T32[(c^d[i])&255]^(c>>>8);return(c^-1)>>>0};
@@ -307,21 +345,23 @@ function zip(files){
   const end=buf(22,v=>{v.setUint32(0,0x06054b50,true);v.setUint16(8,files.length,true);v.setUint16(10,files.length,true);v.setUint32(12,cdS,true);v.setUint32(16,off,true)});
   return new Blob([...parts,...cd,end]);
 }
-$('zip').onclick=async()=>{
+const allSlides=async share=>{
   if(busy)return;busy=true;note('Slaytlar hazırlanıyor…');
   const files=[];
   for(let i=0;i<slides.length;i++){draw(undefined,i);files.push({name:'slayt-'+(i+1)+'.png',data:await png()})}
   draw();
-  if(TOUCH){
+  if(share){
     const fl=files.map(f=>new File([f.data],f.name,{type:'image/png'}));
     if(canShareFiles(fl)){
       try{await navigator.share({files:fl});note('Paylaşım menüsü açıldı.');busy=false;return}
       catch(e){if(e&&e.name==='AbortError'){busy=false;return}}
     }
   }
-  await saveFile('setraporu-slaytlar.zip',new Uint8Array(await zip(files).arrayBuffer()));
+  await saveFile('setraporu-slaytlar.zip',new Uint8Array(await zip(files).arrayBuffer()),true);
   busy=false;
 };
+$('zip').onclick=()=>allSlides(true);
+$('dlzip').onclick=()=>allSlides(false);
 
 $('reel').onclick=async()=>{
   if(busy)return;
@@ -384,7 +424,8 @@ tplList();toUI();tabs();draw();
 const groups=[...document.querySelectorAll('details.grp')],wide=matchMedia('(min-width:821px)');
 const openGroups=()=>groups.forEach((d,i)=>{d.open=wide.matches||i===0});openGroups();
 note(TOUCH?'Yazı/logo/rozeti tutup sürükle · boş yerden sürükleyince görsel kayar · iki parmakla yakınlaştır.':'Önizlemede yazıyı, logoyu, rozeti ve kaynak satırını tutup sürükleyebilirsin. Boş yerden sürüklersen görsel kayar, fare tekerleği yakınlaştırır. Reels için 9:16 seç.');
-if(TOUCH&&canShareFiles([new File(['x'],'a.png',{type:'image/png'})])){$('save').textContent='Kaydet / paylaş';$('zip').textContent='Hepsini paylaş'}
+const canShare=TOUCH&&canShareFiles([new File(['x'],'a.png',{type:'image/png'})]);
+$('save').hidden=!canShare;$('zip').hidden=!canShare;
 if('serviceWorker' in navigator&&location.protocol.indexOf('http')===0)navigator.serviceWorker.register('sw.js').catch(()=>{});
 if(document.fonts&&document.fonts.load){Promise.all(['Anton','Bebas Neue','Archivo Black','Playfair Display'].map(f=>document.fonts.load('900 80px "'+f+'"'))).then(()=>draw()).catch(()=>{})}
 </script>
